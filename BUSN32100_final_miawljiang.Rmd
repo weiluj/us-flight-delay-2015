@@ -1,0 +1,444 @@
+---
+title: "__BUSN32100 Final Exam__"
+author: "Mia Jiang"
+date: "12/03/2022"
+output: pdf_document
+---
+
+```{r setup, include = FALSE}
+# Clear Global Environment
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+rm(list = ls())
+options(
+  scipen = 999,
+  digits = 3
+)
+# Setting the Working Directory
+setwd("~/Desktop/Fall Quarter/BUSN-32100/final-exam")
+
+# Load packages
+library(readr) # read csv
+library(dplyr) # data manipulation
+library(tidyverse)
+library(lubridate) # date time manipulation
+library(hms)
+library(statar) # Regression table output
+library(ggplot2) # Plot
+library(plotly) # Interactive plot
+library(ggpubr) # Arrange multiple plots
+library(scales) # Spatial plot
+library(sf)
+library(spData)
+```
+
+### 1.1.4
+```{r, message = FALSE, echo = TRUE, eval=FALSE}
+# Loading Packages
+install.packages("devtools")
+# I've already installed and updated packages so I set eval=FALSE here to avoid delay in R
+```
+
+### 1.1.5
+```{r, message = FALSE,echo = TRUE,eval=FALSE}
+devtools::install_github("hadley/r4ds")
+# Same as in Q1.4
+```
+
+### 1.1.6
+Created a github account
+
+### 1.1.7
+Downloaded Github Desktop
+
+### 1.1.8
+Watched the video
+
+### 1.1.9
+I downloaded the template but created my own RMD file to finish the assignment
+
+### 1.1.10
+```{r, message = FALSE,echo = TRUE}
+# Install Packages
+list_of_packages <- c("tidyverse", # learn more at tidyverse.org 
+                      "rmarkdown" # http://rmarkdown.rstudio.com
+                      )
+```
+
+### 1.1.11
+```{r, warning=FALSE}
+# Test which packaegs are installed
+new.packages <- list_of_packages[!(list_of_packages %in% installed.packages()[,"Package"])]
+new.packages
+# Print names of all installed packages
+installed.packages <- as.data.frame(installed.packages())
+nrow(installed.packages()) # Total number of packages
+head(installed.packages) # The first 10 packages
+# Stored the information of installed.packages in a new dataframe
+# because print the names of all 264 packages will make the RMD file tediously long
+```
+*Reference*  
+https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
+
+### 1.1.12
+weiluj
+
+### 1.1.13
+Add and commit code with commit message "start-up completed"
+
+### 1.1.14
+Watched the video
+
+### 1.1.15
+Finished Reverting. See Github document with summary called "Q1.1.15 Revert"
+
+### 1.2
+Completed the quizzes on canvas
+
+### 2.1
+```{r, message = FALSE,warning=FALSE}
+# Loading Packages
+library(tidyverse)
+```
+
+### 2.1.1
+```{r, warning = FALSE}
+# Calculate rows in mpg
+nrow(mpg)
+# Calculate columns in mpg
+ncol(mpg)
+# View the structure of mpg
+str(mpg)
+```
+
+__*Interpretation*__  
+Each row represents an observation in the dataset, and each column represents a variable of observations in the dataset.
+\newpage
+
+### 2.1.2
+```{r, warning=FALSE}
+# Scatterplot of hwy vs cyl
+ggplot(mpg) +
+  geom_point(mapping= aes(cyl, hwy), col = "maroon") +
+  labs(title= "Scatterplot of hwy vs cyl",
+       x = "Number of Cylinders",
+       y = "Highway Mileage") +
+  theme_bw() +
+  theme(plot.title = element_text(size = 15, face = "bold", hjust = 0.5))
+```
+
+### 2.1.3
+```{r, warning=FALSE}
+#Interpret variable drv
+?mpg
+table(mpg$drv) # Find the distribution of drv types
+table(mpg$class) # Find the distribution of class types
+```
+
+__*Interpretation*__  
+With help of r function, we know that the variable *drv* describes the type of drive train the car uses, of which *f* means *front-wheel drive*, *r* means *rear wheel drive* and *4* means *four-wheel drive*
+
+### 2.1.4
+```{r, warning=FALSE}
+# Scatterplot of drv vs class
+ggplot(mpg) +
+  geom_point(mapping= aes(class, drv), col = "maroon") +
+  labs(title = "Scatterplot of class vs drv",
+       x = "Type of Car",
+       y = "Type of Drive Train") +
+  theme_bw() +
+  theme(plot.title = element_text(size = 15, face = "bold", hjust = 0.5))
+# I set the variable which has more categories, i.e. class, as the x variable to 
+# make the plot more readable
+```
+*Reference*  
+https://stats.stackexchange.com/questions/123938/how-to-determine-which-variable-goes-on-the-x-y-axes-in-a-scatterplot
+
+__*Interpretation*__  
+The plot is not that useful because both *class* and *drv* are categorical variables. This means that we cannot observe how many points are for each combination. What we could observe in the plot is the combination types of *The type of car* and *The type of drive train*, which are at most $3\times7 = 21$ in this case.  
+Besides, the type of car does not usually determine the type of drive. We only observe 12 types of combination in the plot and most classes are paired with multiple types of drive.We could not conclude any correlation between the two factors. 
+
+### 2.2
+
+### 2.2.1
+```{r, warning = FALSE}
+?mpg # Pull up the documentation
+print(mpg) # View the first 10 rows
+```
+
+__*Interpretation*__
+
+- categorical: chr
+
+- continuous: dbl,int. dbl stands for double, and int stands for integer.
+
+### 2.2.2
+```{r, warning=FALSE}
+# Run the code provided
+# Graph 1
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = hwy, y = cty, color = year))
+# Graph 2
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = hwy, y = cty, color = as.character(year)))
+
+# Find the type of year
+class(mpg$year)
+```
+
+__*Interpretation*__
+
+- The variable *year* is integer so if we do not use the function as.character to make it become a character, R will treat it as numeric and we'll have a legend for each year between 1998 and 2020, which differs from light blue to dark blue. However, if we convert the type of *year* into character, only Year 1998 and 2020 will be chosen as legend type and be classified with 2 different colors. The other parts of the two plots are the same.
+
+- The 2nd plot is better because (1) We only observe data from Year 1998 and 2020 in the dataset. It's meaningless to represent legends of other years while there is no relevant data. (2) The second plot distinguish year 1998 and 2020 in a more obvious way, making it easier to observe the differences.
+
+### 2.2.3
+```{r}
+# Graph 2
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = hwy, y = cty, color = displ < 5))
+```
+
+__*Interpretation*__  
+The pattern of the plot remains the same, however, the legend will be classified as True and False(logical answers) instead of the exact value of displ. *True* represents observations which meet the requirement *displ* < 5, whereas *False* represents those have *displ* > 5  
+
+### 2.2.4
+```{r}
+# Correct the code to show points in blue
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy), color = "blue")
+```
+
+__*Interpretation*__  
+The argument *color = "blue"* is included within the aesthetic. The aesthetic will map a variable and a value, and *color = "blue"* will be treated as categorical, of which the expression *blue* is the only value. Therefore, we must write the *color* code outside the aes() function.
+
+### 2.3
+### 2.3.1
+```{r, warning = FALSE}
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy)) +
+  facet_grid(cols = vars(drv))
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy)) +
+  facet_grid(rows = vars(year))
+
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy)) +
+  facet_grid(rows = vars(year), cols = vars(drv))
+```
+
+__*Interpretation*__  
+facet_grid() will subset the plot based on the variable within the bracket.We can further decide whether to subset the plot by rows or columns by adding functions within the bracket.  
+
+### 2.3.2
+```{r}
+# Facet a continuous variable
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = hwy, y = cty)) +
+  facet_grid(cols = vars(displ))
+```
+
+__*Interpretation*__  
+facet_grid() will convert the continuous variable into categorical variable, and plot each type of combination. However, since we're faceting based on a continuous variable, there will be too many combinations, making the plot unreadable.  
+
+### 2.3.3
+```{r}
+# Reproduce the graph
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = class, y = hwy,color = class)) +
+  facet_grid(rows = vars(year))+
+  theme(axis.text = element_text(size = 16,face = "bold"))
+```
+
+### 2.3.4
+```{r}
+# Reproduce the graph
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = class, y = hwy,color = class)) +
+  facet_grid(rows = vars(year))+
+  theme(axis.text = element_text(size = 16,
+                                 hjust = 1,angle = 45))
+# I learned this before so there is no citation
+```
+
+### 2.3.5
+```{r}
+# Reproduce graph
+ggplot(data = mpg) +
+  geom_point(mapping = aes(x = displ, y = hwy,shape = manufacturer)) +
+  facet_grid(rows = vars(year),cols = vars(drv))
+```
+
+__*Interpretation*__  
+Because the shape palette can only deal with 6 discrete values at most. If we have more than 6 categories, it would be hard to distinguish the differences. In this case, we have 15 car manufacturers. Therefore, the graph only plots data of cars produced by "audi","chevrolet","dodge","ford","honda" or "hyundai", leading to 112 missing observations.  
+*Reference: R help function*
+
+### 2.4 grammar of graphics:geoms
+### 2.4 Q1
+- Line chart: geom_line
+
+- Boxplot: geom_boxplot
+
+- Area chart: geom_area
+
+### 2.4 Q2
+```{r}
+ggplot(data = mpg, mapping = aes(x = displ, y = hwy)) +
+  geom_point() +
+  geom_smooth(se = FALSE)
+
+ggplot() +
+  geom_point(data = mpg, mapping = aes(x = displ, y = hwy)) +
+  geom_smooth(data = mpg, mapping = aes(x = displ, y = hwy), se = FALSE)
+```
+
+__*Interpretation*__  
+The two graphs look the same, because they're using the same data when plotting. In the first part of the code, geom_point() and geom_smooth() will inherit the information in the ggplot bracket, while in the second part of the code each of them include the same information of data within their own brackets. Therefore, the plot will look the same.  
+
+### 2.4 Q3
+```{r}
+ggplot(data = mpg, mapping = aes(x = displ, y = cty)) +
+  geom_point(aes(color = drv)) +
+  geom_smooth(se = FALSE)
+```
+
+### 2.4 Q4
+```{r}
+ggplot(data = mpg, mapping = aes(x = displ, y = cty)) +
+  geom_point(aes(color = drv)) +
+  geom_smooth(color = "black",se = FALSE) + # Change line color
+  labs(title = "Higher Engine Displacement With Less City Gas Mileage", # Add title
+       x = "Engine displacement (litres)", # Add information about x axis
+       y = "City miles (per gallon)") + # Add information about y axis
+  theme(plot.title = element_text(face = "bold"),
+    legend.position = "none") # Remove legend
+```
+
+__*Interpretation*__  
+No. Removing legend will lead to confusion, because we cannot tell what the different colors represent. Other changes will make the plot more informative and readable.(The black line may cover some points but the same situation exists with lines in other colors. Compared to the blue line, black line is more recognizable since it's different from the legend color)  
+
+### 2.4.1.1
+
+- geom_bar() is a kind of bar chart which makes the y values equal to the number of cases in each group. And the bar height is proportional to the number. geom_bar() uses stat_count() by default.
+
+- geom_col() is also a kind of bar chart. However, the y axis of geom_col() plot represents the sum of the value in the data, and the heights of the bars also represent the true value in the data. geom_col() uses stat_identity() by default. 
+*Reference: R Help Function*
+
+### 2.4.1.2
+```{r}
+ggplot(data=mpg, aes(x=hwy)) + 
+  geom_bar()
+ggplot(data=mpg, aes(x=hwy)) + 
+  stat_count()
+```
+
+### 2.4.1.3
+```{r}
+stat_smooth()
+
+ggplot(data=mpg, aes(x=displ, y=hwy)) + 
+  geom_point() +
+  stat_smooth()
+
+ggplot(data=mpg, aes(x=displ, y=hwy)) + 
+  geom_point() +
+  geom_smooth()
+```
+
+__*Interpretation*__
+
+- stat_smooth() computes: Predicted value(y or x), lower pointwise confidence interval around the mean, upper pointwise confidence interval around the mean, standard error
+
+- Those variables are displayed in the same way with geom_smooth(), as they come in pairs 
+
+- se(whether to display confidence interval around the smooth), method(smoothing method to use), formula(which formula to use given the method), na.rm(whether to remove missing value), color etc.  
+
+### 2.4.1.4
+```{r}
+# geom_bar() & stat_count()
+# geom_col() & stat_identity()
+# geom_smooth() & stat_smooth()
+# geom_density() & stat_density()
+# geom_boxplot() & stat_boxplot()
+```
+
+### 2.4.1.5
+```{r}
+ggplot(data = diamonds) +
+  geom_bar(mapping = aes(x = cut, y = ..prop.., group = 1))
+```
+
+__*Interpretation*__  
+If group = 1 is not included, all bars will have the same height, which equals to the value of 1. This is because r will assume that groups are equal to x values by default(1 x category 1 group). And the total probability in each case will all equal to 1. Therefore, group = 1 is required when making proportion bar chart.  
+
+### 2.5
+### 2.5.1
+Large portion of data is missed in this plot because multiple observations share the same combination. In other words, there is overplotting.  
+We should use geom_jitter to correct this. In a geom_jitter plot, it adds random variation to the locations of the points in the graph, i.e, it “jitters” the locations of points slightly. This method reduces overplotting since two points with the same location are unlikely to have the same random variation. The variation could be horizontal or vertical or both by specifying width and height
+
+```{r, warning = FALSE}
+ggplot(data = mpg, mapping = aes(x = cty, y = hwy)) +
+  geom_jitter()
+```
+
+### 2.5.2
+```{r, warning = FALSE}
+ggplot(data = mpg, mapping = aes(x = cty, y = hwy)) +
+  geom_count()
+```
+
+__*Interpretation*__
+
+- Both of them will make positional adjustment to the plot and make the plot indicate the number of cases in each combination.
+
+- geom_count() adjust point sizes based the number of observations in the combination. The more observations, the larger the point size. The legend will also show the number of observations with different point size. However, if the points are too close, or the observations are large, overplotting will occur again.
+
+- geom_jitter() will slightly change poin positions to resolve the overplotting problem. In some cases it will be better than geom_count
+
+- Overall, both are not perfect solution to overplotting.geom_count()does not change the point position while will lead to potential overplotting problem; geom_jitter() will be more effective to avoid overplotting but it will make slight change to the point position and will not allow us to recognize the exact number of observations.  
+*Reference*  
+https://stackoverflow.com/questions/39255781/what-is-difference-between-geom-point-and-geom-jitter-in-simple-language-in-r
+
+### 2.5.3  
+The default setting is position_stack, which means if multiple bars occupying the same position(group) then R will stack them atop of one another. We use position_dodge() to dodge overlapping bars side by side, or use position_fill() to stack bars in a way to show the proportional values of each category within each x group, and standardize each bar to have same heights. Adding position_fill() will generate a plot with 1 bar for each x group.  
+*Reference: R help function*
+
+### 2.6
+### 2.6.1
+
+```{r}
+ggplot(data = mpg, mapping = aes(x = cty, y = hwy)) +
+  geom_point() +
+  geom_abline() 
+
+ggplot(data = mpg, mapping = aes(x = cty, y = hwy)) +
+  geom_point() +
+  geom_abline() + 
+  coord_flip()
+```
+
+__*Interpretation*__  
+If we use coord_flip(), the x axis and y axis will be switched, i.e., the initial x variable now becomes the y variable, and y variable becomes the x variable.
+
+### 2.6.2
+```{r}
+ggplot(data = mpg, mapping = aes(x = cty, y = hwy)) +
+  geom_point() +
+  geom_abline()
+
+ggplot(data = mpg, mapping = aes(x = cty, y = hwy)) +
+  geom_point() +
+  geom_abline() + 
+  coord_fixed()
+```
+
+__*Interpretation*__  
+The plot shows that there is a positive correlation between city and highway mpg. The more city miles per gallon, we would expect the more highway miles per gallon.
+
+- geom_abline() creates a reference line for the plot. The line could be vertical, horizontal or specified with slope and intercept
+
+- coord_fixed() ensures that the reference line is at 45-degree angle, which makes it easier for us to compare the differences between observed hwy and the case that hwy equal to cty, given cty constant
