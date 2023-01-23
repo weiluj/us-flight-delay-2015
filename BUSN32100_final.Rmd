@@ -1,0 +1,693 @@
+---
+title: "__BUSN32100 Final Exam__"
+date: "12/03/2022"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+urlcolor: blue
+---
+
+```{r setup, include = FALSE}
+# Clear Global Environment
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.height = 3,
+  fig.width = 6,
+  fig.align = "center"
+)
+rm(list = ls())
+options(
+  scipen = 999,
+  digits = 3
+)
+# Setting the Working Directory
+setwd("~/Desktop/Fall Quarter/BUSN-32100/final-exam")
+
+# Load packages
+library(readr) # read csv
+library(dplyr) # data manipulation
+library(tidyverse)
+library(janitor)
+library(statar)
+library(airportr) # for merging airport information
+library(lubridate) # date time manipulation
+library(hms)
+library(stargazer) # Regression table output
+library(kableExtra) # print formatted kable
+library(ggplot2) # Plot
+library(plotly)
+library(reshape2) # melt data for correlation map plotting
+library(ggthemes) # Set Theme
+library(ggthemr) 
+library(ggpubr) # Arrange multiple plots
+library(patchwork)
+library(maps) # Spatial plot
+library(modelr) # Modeling
+library(caTools)
+library(InformationValue)
+```
+
+**Research Question** Using the dataset from US Department of Transportation in 2015, I want to explore the patterns of flight departure delay. Specifically, answering the following questions:
+
+-   First, overall, whether the flight delay time or percentage related to the cities that the flight departure from or arriving, whether the percentage of delay is related to time, including departure month, day of the week and scheduled hour.
+
+-   Second, whether the flight departure delay related to air time delay or distance. Does a departure delay also likely to cause air time delay.
+
+-   Third, does the flight delay related to the airline. And if so in which month or hour each airline performs better
+
+-   Lastly, if we are departing from Chicago, which month, hour and airline will be the best choice
+
+-   [Access final cleaned dataset here](https://drive.google.com/drive/folders/1M2_Q-Nypf3QIzpvWNtxC_FDHZ_jrdEbD?usp=sharing)
+
+## 1 Data Cleaning
+
+### 1.1 Import data
+
+```{r}
+# Load data
+files <- list.files(pattern = "*.csv")  #read all csv files
+list2env(
+  lapply(
+    setNames(files, make.names(gsub("_.*|*.csv", "", files))),
+    read.csv
+  ),
+  envir = .GlobalEnv #save as separate df in Global Environment
+)
+# Check dataset
+glimpse(flights)
+
+# Check supporting dataset
+# Airport information
+glimpse(airports)
+# Missing values
+colSums(is.na(airports))
+# Fill out missing values
+na_airport <- airports[is.na(airports$LATITUDE), "IATA_CODE"] # find missing airport IATA code
+# Create empty tibble with column names to store the info
+airport_info <- tibble(
+  "IATA_CODE" = character(),
+  "LATITUDE" = numeric(),
+  "LONGITUDE" = numeric()
+)
+# Function to find the location info for missing values
+i <- 1
+for (i in seq_along(na_airport)) {
+  airport_info[i, 1] <- na_airport[i] # IATA_CODE
+  airport_info[i, 2:3] <- airport_location(na_airport[i]) # geo location info
+  i <- i + 1
+}
+# Combine to the original Airport data frame
+airports[is.na(airports$LATITUDE), "LATITUDE"] <- airport_info$LATITUDE
+airports[is.na(airports$LONGITUDE), "LONGITUDE"] <- airport_info$LONGITUDE
+
+# Airline information
+glimpse(airlines)
+colSums(is.na(airlines))
+```
+
+***Explanation***
+
+-   There are multiple airport information missing in the dataset provided in Kaggle. Therefore, I used the package in R to fill out the missing information.
+-   Packages used in the analysis are include in the RMD file but not the PDF.
+
+### 1.2 Merge Dataset
+
+```{r}
+flight_merged <- flights %>%
+  left_join(airports, by = c("ORIGIN_AIRPORT" = "IATA_CODE")) %>%
+  left_join(airports, by = c("DESTINATION_AIRPORT" = "IATA_CODE")) %>%
+  select(-contains("COUNTRY")) %>% # all flights were departing in the US
+  clean_names(
+    replace = c(`.x` = "_ORIGIN", `.y` = "_DESTINATION")
+  ) %>%
+  left_join(airlines, by = c("airline" = "IATA_CODE")) %>%
+  rename(
+    "airline_name" = AIRLINE,
+    "scheduled_airtime" = scheduled_time
+  ) %>%
+  filter(cancelled == 0) %>% # filter out cancelled flights
+  select(
+    -contains(c("taxi", "wheels", "elapsed", "arrival", "cancell")),
+    -diverted, -year, -c(air_system_delay:weather_delay)
+  ) # remove non-informative column
+```
+
+### 1.3 Check Data
+
+```{r}
+# Check missing values 
+colSums(is.na(flight_merged))
+# Remove rows with empty air time information
+flight_merged <- flight_merged %>%
+  filter(!is.na(air_time))
+# Check rows with empty airport info
+summary(flight_merged[is.na(flight_merged$airport_origin), "month"])
+#double check to make sure no missing value is included: colSums(is.na(flight_merged))
+
+# Check duplicated values
+flight_dup <- flight_merged %>% get_dupes(
+  month, day, scheduled_departure, # same time
+  origin_airport, destination_airport, # same location schedule
+  airline, tail_number # same flight
+) 
+flight_dup <- flight_dup %>%
+  filter(flight_number != 1865) # only keep the last one which is correct
+
+flight_merged <- anti_join(flight_merged, flight_dup, # remove wrong duplicated data
+  by = c(
+    "month", "day", "scheduled_departure",
+    "origin_airport", "destination_airport",
+    "airline", "tail_number", "flight_number"
+  )
+) %>%
+  select(-flight_number)
+```
+
+***Interpretation***
+
+-   After removing all na values from other columns, there are still 482872 in columns with missing airport information. It turns out that all of those data are from October. To make sure the time series analysis consistent, I did not remove those values.
+
+## 2. Feature Engineering
+
+### 2.1 Create a new column with air time delay
+
+```{r}
+flight_merged <- flight_merged %>%
+  mutate(air_time_delay = air_time - scheduled_airtime)
+```
+
+### 2.2. Formatting date time columns
+
+```{r}
+# Function to combine date time info
+clean_dttm <- function(year, month, day, time) {
+  make_datetime(year, month, day, time %/% 100, time %% 100)
+}
+# Apply the function to the date set
+flight_merged <- flight_merged %>%
+  mutate(
+    date = format(clean_dttm(2015, month, day, departure_time), "%b-%d"), # create date
+    day_of_week = factor(
+      as.factor(
+        day_of_week # convert to factor column, for plotting
+      ),
+      labels = c(
+        "Mon",
+        "Tues",
+        "Wed",
+        "Thurs",
+        "Fri",
+        "Sat",
+        "Sun"
+      )
+    ),
+    scheduled_departure = hms((scheduled_departure %/% 100 * 3600 # Hour
+      + scheduled_departure %% 100 * 60)), # Mins
+    scheduled_dep_hour = hour(scheduled_departure) # Create ]sche_dep_hour column
+  )
+```
+
+### 2.3 Create a column with departure delay dummy variable
+
+```{r}
+flight_merged <- flight_merged %>%
+  mutate(departure_delayed_dummy = ifelse(
+    departure_delay >= 15,
+    1, # if delay exceeds 15 mins, equals 1
+    0 # if delay is shorter than 15 mins, equals 0
+  )) %>%
+  select(
+    date, month, day, day_of_week, # select dataset column order
+    scheduled_departure, scheduled_dep_hour,
+    departure_delay, departure_delayed_dummy,
+    scheduled_airtime, air_time_delay, distance,
+    airline, airline_name, everything()
+  )
+# Write to csv
+# write_csv(flight_merged, "flight_merged_clean.csv")
+```
+
+## 3. Exploratory Analysis
+
+### 3.1 Distribution of data
+
+#### 3.1.1 Summary Statistics
+
+```{r}
+as.data.frame(summary(select_if(flight_merged, is.numeric))) %>%
+  select(-Var1) %>%
+  separate(Freq, into = c("attribute", "value"), sep = ":", extra = "merge") %>%
+  mutate(attribute = str_remove(attribute, "\\.")) %>%
+  rename(Variable = "Var2") %>%
+  pivot_wider(
+    names_from = attribute,
+    values_from = value
+  ) %>%
+  select(-contains("NA")) %>%
+  filter(!grepl("longitude|latitude", Variable)) %>% #remove geo location columns
+  kable(
+    caption = "Summary Statistics",
+    format.args = list(scientific = FALSE)
+  ) %>%
+  kable_classic() %>%
+  kable_styling(
+    position = "center", font_size = 8,
+    full_width = T, html_font = "Cambria",
+    c("stripend", "bordered")
+  )
+```
+
+#### 3.1.2 Distribution of Categorical columns
+
+```{r}
+# Find distribution of month
+count(flight_merged, month) %>% arrange(desc(n))
+# Find the overall percentage of delayed flights
+count(flight_merged, departure_delayed_dummy)
+# Find distribution of origin and destination city
+count(filter(flight_merged, !is.na(city_destination)), city_origin) %>%
+  arrange(desc(n)) %>%
+  head(10) %>%
+  cbind(count(filter(flight_merged, !is.na(city_destination)), city_destination) %>%
+  arrange(desc(n)) %>%
+  head(10))
+```
+
+***Interpretation***
+
+-   Based on the analysis above, we can see that most flights are not delayed, while the maximum delay minutes were 1988. The dataset contains flight info from the start of the year to the end of 2015. After cleaning the dataset, there are 5819079 observations left and those data are relatively evenly distributed by Month.
+
+-   Chicago has the highest number of flights either by departure or arrival number. The top 10 airports with the highest flight number does not change either by departure or arrival.
+
+### 3.2 Overall Analysis
+
+#### 3.2.1 Heatmap Correlation
+
+```{r,fig.height= 6}
+# Set theme
+ggthemr("fresh")
+theme <- 
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 10, face = "italic", hjust = 0.5),
+    axis.title = element_text(size = 9, face = "bold"),
+    plot.caption = element_text(size = 6, face = "italic", hjust = 0),
+    axis.text = element_text(size = 9),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8)
+  )
+# Calculate correlation
+corr_mat <- round(cor(select_if(
+  select(flight_merged, -contains(c("latitude", "longitude"))), is.numeric
+)), 2)
+# Reshape correlation data
+melted_corr_mat <- melt(corr_mat)
+# Plot
+ggplot(melted_corr_mat) +
+  geom_tile(aes(Var1, Var2, fill = value)) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 5)) +
+  scale_fill_continuous_tableau(
+    name = "Value",
+    breaks = seq(-0.5, 1, 0.2)
+  ) +
+  labs(title = "Correlation of Flight Delay Index in 2015") +
+  theme +
+  theme(axis.text.x = element_text(size = 6, angle = 90)) +
+  legend_top()
+```
+
+***Explanation***
+
+-   Departure delay is slightly correlated with departure hour, airtime and real departure time.
+
+#### 3.2.2 Distribution of delayed time
+
+```{r}
+flight_merged %>%
+  ggplot() +
+  geom_freqpoly(aes(departure_delay)) +
+  labs(x = "Departure Delay(mins)")
+```
+
+***Explanation***
+
+-   Most flights were not delayed at departure. And for those delayed flights, most were short delays. However, there is some abnormal delays which was more nearly 2000 mins.
+
+#### 3.2.3 Delayed percentage by time
+
+```{r}
+# Write function to calculate the percentage by selected group
+# function
+#one disaggregation variable
+get_delay_pct <- function(col, df) {
+  # get data frame
+  data <- df %>%
+    group_by(df[[col]]) %>%
+    summarise(delay_pct = mean(departure_delayed_dummy))
+
+  colnames(data) <- c(col, "delay_pct")
+  data
+}
+
+#multiple disaggregation variables
+get_delay_pct_db <- function(col1, col2, df) {
+  # get data frame
+  data <- df %>%
+    group_by(df[[col1]], df[[col2]]) %>%
+    summarise(delay_pct = mean(departure_delayed_dummy))
+  colnames(data) <- c(col1, col2, "delay_pct")
+  data
+}
+
+# Generate Plot
+get_plt <- function(var, df) {
+  plt <- df %>%
+    ggplot() +
+    geom_line(aes(factor(df[[var]]), delay_pct,
+                  group = 1)) +
+    labs(
+    y = "Delay Percentage",
+    caption = "Data Source: US DOT, Year 2015"
+  ) + 
+    theme
+  plt
+}
+```
+
+```{r, fig.width = 8, fig.height = 6}
+# By month
+plt_month <- get_plt("month", get_delay_pct("month", flight_merged)) +
+  labs(
+    subtitle = "Summer and Winter has Highest Delayed Flights Rate",
+    x = "Month"
+  )
+
+# By day of the week
+plt_week <- get_plt("day_of_week", get_delay_pct("day_of_week", flight_merged)) +
+  labs(
+    subtitle = "Monday and Thursday has Highest Delayed Flights Rate",
+    x = "Day of the Week"
+  )
+
+# By hour
+plt_hour <- get_plt("scheduled_dep_hour", get_delay_pct("scheduled_dep_hour",
+                                                        flight_merged)) +
+  labs(
+    subtitle = "Early Evening has Highest Delayed Flights Rate",
+    x = "Departure Hour"
+    ) +
+  scale_x_discrete(breaks = seq(0, 23, 2))
+#Check number of flights
+flight_merged %>%
+  group_by(scheduled_dep_hour) %>%
+  summarise(count = n()) %>%
+  arrange(count)
+
+(plt_month | plt_hour) /
+  plt_week
+```
+
+***Explanation***
+
+-   June has the highest delay rate, followed by other months in summer and February. Delay rate in Autumn is pretty low.
+
+-   During the week, midweek has higher delay rate. The rate then goes down and increases sharply on Sunday and Monday. The trend is potentially related to work schedule. Near the end of the week people need to come back to home city or plans to go out during the weekend, then before workday starts they need to take flights back. As the demand increases, delay could be more likely to happen.
+
+-   During the day, 4am-6am has the lowest delay rate, but by checking the data we know that the number of flights are also significantly less compared to any other time period. Starting early morning, the delay rate continues to increase, peaking at early night around 8pm. Besides, 2am has the second highest delay rate.
+
+```{r, fig.height = 4}
+# By month and day
+get_delay_pct_db("month", "day_of_week", flight_merged) %>%
+  ggplot() +
+  geom_line(aes(day_of_week, delay_pct,
+                group = 1)) +
+  labs(
+    title = "Delayed Flights Rate by Month and Day",
+    x = "Day",
+    y = "Delay Percentage",
+    caption = "Data Source: US DOT, Year 2015"
+  ) +
+  facet_wrap(~month) +
+  theme +
+  theme(axis.text.x = element_text(angle = 90))
+# By month and hour
+get_delay_pct_db("scheduled_dep_hour", "day_of_week", flight_merged) %>%
+  ggplot() +
+  geom_line(aes(scheduled_dep_hour, delay_pct)) +
+  scale_x_continuous(breaks = seq(0, 23, 2)) +
+  labs(
+    title = "Delayed Flights Rate by Day and Hour",
+    x = "Hour",
+    y = "Delay Percentage",
+    caption = "Data Source: US DOT, Year 2015"
+  ) +
+  facet_wrap(~day_of_week) +
+  theme
+```
+
+***Explanation***
+
+-   Distribution of delay rate during the week varies across month. In general, summer months have high delay rate throughout the week, with a slightly higher rate during the beginning of a week. In December, early days during the week are more likely to have delay. All other months follow the overall trend.
+
+-   The delay pattern by hour is quite similar during throughout the week.
+
+#### 3.2.4 Delayed percentage by origin and destination
+
+```{r}
+# By origin
+plt_delay_ori_h <- get_delay_pct("origin_airport", filter(flight_merged, month!= 10)) %>%
+  slice_max(order_by = delay_pct, n = 10) %>%
+  ggplot() +
+  geom_col(aes(fct_reorder(origin_airport, desc(delay_pct)), 
+               delay_pct),
+           fill = "#65ADC2") +
+  labs(
+    title = "Airports witht the Highest Delayed Rate",
+    x = "Origin Airport",
+    y = "Delay Percentage") +
+  theme
+plt_delay_des_h <- get_delay_pct("destination_airport", filter(flight_merged, month!= 10)) %>%
+  slice_max(order_by = delay_pct, n = 10) %>%
+  ggplot() +
+  geom_col(aes(fct_reorder(destination_airport, desc(delay_pct)), 
+               delay_pct),
+           fill = "#65ADC2") +
+  labs(
+    x = "Destination Airport",
+    y = "Delay Percentage",
+    caption = "Data Source: US DOT, Year 2015") +
+  theme
+
+ggarrange(plt_delay_ori_h, plt_delay_des_h,
+          nrow = 2)
+```
+
+```{r}
+# ILG By month
+get_delay_pct("month", filter(flight_merged, origin_airport == "ILG")) %>%
+  arrange(desc(delay_pct)) 
+# By hour
+get_delay_pct("scheduled_dep_hour", filter(flight_merged, origin_airport == "ILG")) %>%
+  ggplot() +
+  geom_col(aes(scheduled_dep_hour, delay_pct)) +
+  scale_x_continuous(breaks = seq(1, 24, 1)) +
+  labs(
+    title = "Delayed Flights Rate by Hour in Wilmington Airport",
+    x = "Hour",
+    y = "Delay Percentage",
+    caption = "Data Source: US DOT, Year 2015"
+  ) +
+  theme
+
+# Destination
+get_delay_pct("destination_airport", filter(flight_merged, origin_airport == "ILG")) %>%
+  arrange(desc(delay_pct)) 
+```
+
+***Explanation***
+
+-   ADK airport has the highest delay rate both by origin and destination. By looking at the data, we find out that flights to or from ILG is most likely to delay in 7am, 12pm and 16pm, with flights to *Orlando(MCO)* or *Tampa(TPA)*
+
+#### 3.2.5 Top Cases by unique carrier
+
+```{r}
+# Carriers with the highest delay rate in 2015
+get_delay_pct("airline_name", flight_merged) %>%
+  arrange(desc(delay_pct)) %>%
+  ggplot() +
+  geom_col(aes(x = fct_reorder(airline_name, delay_pct),
+               y = delay_pct)
+  ) +
+  scale_y_continuous(breaks = seq(0, 0.25, 0.05)) +
+  labs(title = "Carrier with Highest Flight Delay Rate",
+       caption = "Data Source: US Department of Transportation, Year 2015",
+       x = "Carrier",
+       y = "Percentage of Delayed Flights") +
+  coord_flip() +
+  theme
+```
+
+#### 3.2.6 Relationship of delay time and air time
+
+```{r, fig.height = 3}
+# Analysis:
+#flight_merged %>% filter(departure_delay > 15) %>%
+# mutate(departure_delay = winsorise(departure_delay, probs = c(0, 0.9))) %>%
+# ggplot(aes(cut_interval(departure_delay, 6), air_time_delay)) + geom_boxplot()
+```
+
+***Explanation***
+
+-   By running the analysis above, the distribution of air time delay does not seem to have a strong correlation with departure delay. The average air time delay converges below 0.
+
+## 3.3 Analysis of Chicago Airports
+
+```{r, fig.width = 7, fig.height = 4.5}
+chicago <- flight_merged %>%
+  filter(city_origin == "Chicago")
+# By month
+get_plt("month", get_delay_pct("month", chicago)) +
+  labs(
+    title = "Delayed Flights Rate by Month in Chicago",
+    subtitle = "June and Feb has the Highest Delayed Flights Rate",
+    x = "Month"
+  ) +
+  theme
+# Which Flight to choose in Feb or June
+chicago %>%
+  filter(month %in% c(2, 6)) %>%
+  group_by(day_of_week, airline) %>%
+  summarise(delay_pct = mean(departure_delayed_dummy)) %>%
+  slice_min(order_by = delay_pct)
+
+chicago %>%
+  filter(month %in% c(2, 6)) %>%
+  group_by(scheduled_dep_hour, airline) %>%
+  summarise(delay_pct = mean(departure_delayed_dummy)) %>%
+  slice_min(order_by = delay_pct)
+
+# By carrier
+get_delay_pct_db("scheduled_dep_hour", "airline_name", chicago) %>%
+  ggplot() +
+  geom_line(aes(scheduled_dep_hour, delay_pct)) +
+  scale_x_continuous(breaks = seq(0, 23, 4)) +
+  labs(
+    title = "Delayed Flights Rate by Carrier in Chicago",
+    x = "Departure Hour",
+    y = "Delay Percentage",
+    caption = "Data Source: US DOT, Year 2015"
+  ) +
+  facet_wrap(~airline_name) +
+  theme
+```
+
+```{r, fig.height = 3}
+# By destination: if we're going to New  York
+get_delay_pct_db("destination_airport", "airline_name", filter(chicago, city_destination == "New York")) %>%
+  arrange(delay_pct, destination_airport)
+
+get_delay_pct_db("destination_airport", "scheduled_dep_hour",
+                 filter(chicago, city_destination == "New York")) %>%
+  arrange(delay_pct) %>%
+  ggplot() +
+  geom_line(
+    aes(scheduled_dep_hour, delay_pct,
+      color = destination_airport
+    ),
+    size = 1
+  ) +
+  scale_x_continuous(breaks = seq(0, 23, 2)) +
+  labs(
+    title = "Delayed Flights Rate by Carrier in Chicago",
+    x = "Departure Hour",
+    y = "Delay Percentage",
+    caption = "Data Source: US DOT, Year 2015"
+  ) +
+  theme
+```
+
+***Explanation***
+
+-   In general, flights in June and February has the highest delay rate, which is likely caused by the weather condition and number of people on travel during the summer. The delay rate is also higher than the average across the nation.
+
+-   All flights have a higher delay rate at night and all carriers perform similarly on flight delay, while VX has an abnormally high delay rate compare to others around noon. Also, Frontier Airline is not a good choice in particular if we want to leave Chicago in early morning like 4am. Among all others, *JetBlue*, *Delta* and *Spirit* are not good choices as they have higher delay rate overall.
+
+-   If we want to go New York, *Skywest Airlines Inc.* to *LFA* and *Delta Air Lines Inc.* to *JFK* has a lower delay rate on average. And the delay rate at *JFK* is higher in most cases during the day except between *10am-12am*
+
+# 4. Model
+
+```{r}
+flight_merged <- flight_merged %>%
+  mutate(day_of_week = as.numeric(day_of_week)) # convert to numeric for model
+#a.Basic model
+#Does departure delay related to departure time
+reg <- lm(departure_delay ~ month + day_of_week + scheduled_dep_hour, data = flight_merged)
+stargazer(reg, type = "text")
+
+#b.Improve model
+reg_full <- lm(departure_delay ~ month + day_of_week + scheduled_dep_hour
+               + airline + air_time*distance, data = flight_merged)
+stargazer(reg_full, type = "text")
+# Output residual and RMSE
+summary(reg_full)$r.squared
+rmse(reg_full, flight_merged)
+# Plot
+ggplot(reg_full, aes(x = scheduled_dep_hour, y = departure_delay)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE)
+
+#c.Train dataset
+sample <- sample.split(flight_merged$month, SplitRatio = 0.6)
+train  <- subset(flight_merged, sample == TRUE)
+test   <- subset(flight_merged, sample == FALSE)
+# Run regression again
+reg_train <- lm(departure_delay ~ month + day_of_week + scheduled_dep_hour
+               + airline + air_time*distance, data = train)
+#View result
+summary(reg_train)
+
+#d.Logistic Regression
+reg_lo <- glm(departure_delayed_dummy ~ month + day_of_week + scheduled_dep_hour
+  + airline + air_time * distance, data = train, family = "binomial")
+summary(reg_lo)
+# Prediction
+#Plot
+fitted.results <- predict(reg_lo, test, type = "response")
+fitted.results <- ifelse(fitted.results > 0.5, 1, 0)
+# Accuracy
+confusionMatrix(test$departure_delayed_dummy, fitted.results)
+sensitivity(test$departure_delayed_dummy, fitted.results) # true positive rate
+specificity(test$departure_delayed_dummy, fitted.results) # true negative rate
+
+# Plot
+prediction <- matrix(nrow = 2285597, ncol = 2)
+prediction[, 1] <- fitted.results
+prediction[, 2] <- test$departure_delayed_dummy
+
+as.data.frame(prediction) %>%
+  group_by(V1, V2) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(factor(V1), count)) +
+  geom_col(aes(fill = factor(V2)),
+           position = "dodge") +
+  scale_fill_brewer("Real Delay") +
+  labs(x = "Predicted Delay",
+       y = "Count") +
+  facet_wrap(~V1,
+             scales = "free")
+```
+
+***Explanation***
+
+-   The coefficient of scheduled departure hour on departure delay is 0.841 and is significant given alpha equals 0.01, which means given all other conditions the same, a flight 1 hour late will have an expected increase at 0.841 min for departure delay.
+
+-   The coefficient of month and day of the week are both negative, which means the later in a month or in a day of the week, the more likely we need to expect a higher delay for departure. The result aligns with the exploratory analysis in part 3.
+
+-   For airline, given all others equal, we will expect 6.520 mins increase on departure delay on average if taking a flight with *Spirit Air Lines*. Other airlines which has an obvious negative effect on departure delay includes *Frontier Airlines Inc.*, *JetBlue Airways*, *United Air Lines Inc.*. Most of the airlines are cheap airlines, so it makes sense that flight delay is more likely to happen. In contrast, a flight with *Hawaiian Airlines Inc.* will have an expected decrease at 8.5 mins for departure delay.
+
+-   However, the R square is **0.019**, which performs very poor. It means the departure delay time for flights in US in 2015 does not significantly related to departure hour, although it's significant at 1% level. As shown in the plot, the prediction model cannot predict the real departure delay time well.
+
+-   With the logistic regression however, the overall accuracy turns out to be good, which is 81.6%. However, sensitivity is super low at the level of 0.03%, the prediction is not good at predicting delay as well.
